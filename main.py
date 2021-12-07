@@ -6,14 +6,40 @@ from itertools import count
 from socket import ntohs, socket, PF_PACKET, SOCK_RAW
 from playhouse.db_url import connect
 import protocols
+import configparser
 
 # This app can catalog assets through their ip address in a ethernet network
 
 i = ' ' * 4  # Basic indentation level
 
-db = connect('mysql://user:passw0rd@localhost:3306/ip')
+db = connect('mysql://gb:Raspberry1@localhost:3306/ip')
 packets = []
 
+common_ports = None
+my_ip_addresses4 = None
+my_ip_addresses6 = None
+# Quello che viene dall'esterno va catalogato tutto, quello
+# che esce dall'interno (dal mio IP) posso catalogarlo una
+# volta sola (es. memorizzo 1 volta sola che ha comunicato
+# con www.google.com sulla porta 443)
+verbose = False
+
+def parse_config():
+    global common_ports, my_ip_addresses4, my_ip_addresses6, verbose
+    try:
+        config = configparser.ConfigParser(converters={'list': lambda x: [i.strip() for i in x.split(',')]})
+        config.read('config.cfg')
+        common_ports = [int(x) for x in config.getlist('DEFAULT', 'common_ports')]
+        my_ip_addresses4 = config.getlist('DEFAULT', 'my_ip_addresses4')
+        my_ip_addresses6 = config.getlist('DEFAULT', 'my_ip_addresses6')
+        verbose = True if int(config['DEFAULT']['verbose']) == 1 else False
+        print("Config file loaded successfully.")
+        return True
+    except:
+        print("Error reading config file!")
+        common_ports = None
+        my_ip_addresses4 = None
+        return False
 
 class BaseModel(Model):
     class Meta:
@@ -25,8 +51,8 @@ class Communications(BaseModel):
     id = IntegerField(constraints=[SQL("UNSIGNED")])
     src_ip4 = CharField(16)
     dest_ip4 = CharField(16)
-    src_ip6 = CharField()
-    dest_ip6 = CharField()
+    src_ip6 = CharField(32)
+    dest_ip6 = CharField(32)
     src_mac = CharField(17)
     dest_mac = CharField(17)
     src_port = SmallIntegerField(constraints=[SQL("UNSIGNED")])
@@ -125,18 +151,37 @@ def insert_record(p):
     to_db.save()
 
 
-def check_exist(packet):
+def update_record(p):
+    to_db = Communications(p.src_ip4, p.dest_ip4, p.src_ip6, p.dest_ip6, p.src_mac, p.dest_mac,
+                           int(p.src_port) if p.src_port is not None else p.src_port,
+                           int(p.dest_port) if p.dest_port is not None else p.dest_port, p.proto, p.flags)
+    to_db.update()
+
+
+def check_packet(packet): 
+    """
+    True = aggiungi il pacchetto, False = aggiornane il timestamp
+    """
     if len(packets) == 0:
         # print('first packet added')
-        packets.append(packet)
-        insert_record(packet)
-        return True
-    for ex_pk in packets:
-        if ex_pk == packet:
-            return True
-    # print('new packet - adding')
-    packets.append(packet)
-    insert_record(packet)
+        return True, "Aggiunto"
+    
+    if packet in packets:
+        return False, "Il pacchetto esiste già"
+    
+    if packet.src_ip4 in my_ip_addresses4 or packet.src_ip6 in my_ip_addresses6:
+        if packet.dest_port in common_ports:
+            if packet.dest_ip4 in [x.dest_ip4 for x in packets if x.src_ip4 in my_ip_addresses4] or \
+               packet.dest_ip6 in [x.dest_ip6 for x in packets if x.src_ip6 in my_ip_addresses6]:
+                return False, "Comunicazione in uscita già memorizzata"
+    
+    return True, "Aggiunto"
+    
+
+
+def print_packet_custom(packet):
+    print("{} {} {} {} {} {} {}".format(packet.src_ip4, packet.dest_ip4, packet.src_mac, \
+        packet.dest_mac, packet.src_port, packet.dest_port, packet.proto))
 
 
 class SniffToDB(OutputMethod):
@@ -184,7 +229,19 @@ class SniffToDB(OutputMethod):
                 pk.src_ip4 = self.p.ipv4.source
                 pk.dest_ip4 = self.p.ipv4.dest
                 pk.flags = self.p.icmp.type_txt
-        check_exist(pk)
+
+        my_check, reason = check_packet(pk)
+        if my_check:
+            insert_record(pk)
+            packets.append(pk)
+            if verbose:
+                print("Pacchetto inserito:")
+                print_packet_custom(pk)
+        else:
+            update_record(pk)
+            if verbose:
+                print(f"Aggiornato il timestamp, {reason}:")
+                print_packet_custom(pk)
         # print(len(packets))
 
     def _display_packet_contents(self):
@@ -207,6 +264,9 @@ def sniff(interface: str, displaydata: bool):
 
 
 if __name__ == '__main__':
+    if not parse_config():
+        exit()
+    
     db.connect()
     packets_in_db = Communications.select().execute()
     packets = list(packets_in_db)
