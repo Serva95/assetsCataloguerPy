@@ -2,79 +2,20 @@ import pyshark
 from peewee import *
 from playhouse.db_url import connect
 import datetime
-import configparser
-import multiprocessing
-import time
+#import multiprocessing
+#import time
 
-db = connect('mysql://external:passw0rd@localhost:3306/ip')
+db_username = "external"
+db_password = "passw0rd"
+db_url = "localhost:3306"
+database_name = "ip"
+
+db = connect(f"mysql://{db_username}:{db_password}@{db_url}/{database_name}")
 
 packets = []
-verbose = None
-more_verbose = None
-interface = None
+interface = "eth0" # Interfaccia sulla quale mettersi in ascolto dei pacchetti
 bpf_filter = None
 output_file = None
-
-ports_and_protocols = {
-    "data-text-lines": [80],
-    "DCE-RPC/OXID": [135, 445],
-    "DHCP": [67, 68],
-    "DHCPv6": [547],
-    "DNS": [53],
-    "FTP": [21],
-    "GigE Vision Control": [3956],
-    "HTTP": [80, 8080],
-    "IMAP": [143],
-    "IMAP v3": [220],
-    "IPP/CUPS (Stampa)": [631],
-    "Kerberos": [88],
-    "LLMNR": [5355],
-    "LPD (Stampa)": [515],
-    "MNDP": [5678],
-    "Modbus": [502],
-    "MQTT": [1883],
-    "MS Active Directory/SMB": [445],
-    "NetBIOS Name Service": [137],
-    "NetBIOS Datagram Service": [138],
-    "NetBIOS Session Service": [139],
-    "NTP": [123],
-    "ONC/Sun RPC": [111],
-    "PDL (Stampa)": [9100],
-    "POP3": [110],
-    "rlogin": [513],
-    "SMB?": [139, 445],
-    "SMB 2?": [139, 445],
-    "SMTP": [25],
-    "SNMP": [161],
-    "SSH": [22],
-    "TCP": [21, 22, 23, 25, 80, 110, 111, 135, 139, 143, 220, 443, 445, 502, 513, 515, 631, 1883, 8080, 9100],
-    "TLS": [443, 5935, 8080],
-    "UDP": [161],
-    "VNC": [5900]
-}
-
-common_ports = set()
-for a_list in ports_and_protocols.values():
-    for port in a_list:
-        common_ports.add(port)
-
-forescout = "172.17.130.11"
-
-def parse_config():
-    global verbose, more_verbose, interface, bpf_filter, output_file
-    try:
-        config = configparser.ConfigParser()
-        config.read('/home/ss4sp/pysharkAC/config.cfg')
-        verbose = True if int(config['DEFAULT']['verbose']) == 1 else False
-        more_verbose = True if int(config['DEFAULT']['more_verbose']) == 1 else False
-        interface = config['DEFAULT']['interface']
-        bpf_filter = config['DEFAULT']['bpf_filter']
-        output_file = config['DEFAULT']['output_file']
-        print("Caricato il file di configurazione.")
-        return True
-    except:
-        print("Errore nel caricamento del file di configurazione.")
-        return False
 
 
 class BaseModel(Model):
@@ -214,15 +155,13 @@ def check_packet(packet):
     if packet in packets:
         return 1, "Il pacchetto esiste già"
 
-    if packet.dest_port in common_ports:
-        for x in packets:
-            if x.dest_port == packet.dest_port and x.src_ip4 == packet.src_ip4 and x.dest_ip4 == packet.dest_ip4 and x.proto == packet.proto:
-                return 2, "I due dispositivi hanno già comunicato con lo stesso protocollo su questa dest_port"
+    for x in packets:
+        if x.dest_port == packet.dest_port and x.src_ip4 == packet.src_ip4 and x.dest_ip4 == packet.dest_ip4 and x.proto == packet.proto:
+            return 2, "I due dispositivi hanno già comunicato con lo stesso protocollo su questa dest_port"
 
-    if packet.src_port in common_ports:
-        for x in packets:
-            if x.src_port == packet.src_port and x.src_ip4 == packet.src_ip4 and x.dest_ip4 == packet.dest_ip4 and x.proto == packet.proto:
-                return 3, "I due dispositivi hanno già comunicato con lo stesso protocollo su questa src_port"
+    for x in packets:
+        if x.src_port == packet.src_port and x.src_ip4 == packet.src_ip4 and x.dest_ip4 == packet.dest_ip4 and x.proto == packet.proto:
+            return 3, "I due dispositivi hanno già comunicato con lo stesso protocollo su questa src_port"
 
     return 0, "Pacchetto nuovo"
 
@@ -236,9 +175,6 @@ def start_sniffing():
     print("start sniffing")
     try:
         capture = pyshark.LiveCapture(interface=interface, bpf_filter=bpf_filter)
-        #capture = pyshark.LiveRingCapture(interface=interface, bpf_filter=bpf_filter, ring_file_size=102400, ring_file_name='~/pysharkAC/tmp.pcap')
-        #capture.sniff(timeout=30)
-        #capture.set_debug()
         for packet in capture.sniff_continuously(packet_count=500000):
             src_ip4   = None
             dest_ip4  = None
@@ -280,15 +216,7 @@ def start_sniffing():
             elif 'udp' in packet:
                 src_port = packet.udp.srcport
                 dest_port = packet.udp.dstport
-
-            if src_ip4 == forescout or dest_ip4 == forescout:
-                proto     = None
-                src_port  = None
-                dest_port = None
-                flags     = None
-
-            # Ignoro i flags, li gestiamo con Suricata
-            #flags = None
+            
 
             pk = Packet(src_ip4, dest_ip4, src_ip6, dest_ip6, src_mac, dest_mac, src_port, dest_port, proto, flags)
             my_check, reason = check_packet(pk)
@@ -318,9 +246,6 @@ def start_sniffing():
 
 
 if __name__ == '__main__':
-    if not parse_config():
-        exit()
-
     db.connect()
     packets_in_db = Communications.select()
 
@@ -329,11 +254,5 @@ if __name__ == '__main__':
 
     print("Caricati i dati dal database.")
 
-    #while True:
-        #proc = multiprocessing.Process(target=start_sniffing, args=())
-        #proc.start()
-        #time.sleep(43200)
-        # Terminate the process
-        #proc.terminate()
     while start_sniffing():
         pass
