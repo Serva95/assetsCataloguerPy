@@ -1,32 +1,25 @@
-# Guida al setup
+# Setup guide
 
-## Dipendenze Python
-Per installare le dipendenze di Python:
+## Python dependencies
+To install Python dependencies:
 
     pip install -r requirements.txt
 
-Può essere necessario installare anche <code>pymysql</code>, in quel caso il
-comando è:
+You may also need to install <code> pymysql </code>, in which case the command is:
 
     pip install pymysql
 
 ## Database
-Sulla macchina in esecuzione dovrà essere installato MySQL. Ad esempio, nel
-caso di una distribuzione Ubuntu:
+MySQL must be installed on the machine. For example, in the case of an Ubuntu distribution:
 
     sudo apt install mysql-server
 
-Dovrà essere creato un utente per il database con nome a scelta
-(al momento, nel programma, il nome utente è "external", basta cambiarlo
-nel codice a seconda dell'utente creato).
+A user for the database must be created with a name of your choice (at the moment, in the program, the user name is "external", just change it in the code according to the user created).
 
-Scelta la password per l'utente creato, scriverla nell'apposita variabile
-nel codice.
+After choosing the password for the created user, write it in the appropriate code variable.
 
-### Database e Tabelle
-Successivamente si dovrà creare un database chiamato "ip"; fatto ciò,
-creare una tabella (nel database "ip") chiamata "communications"
-con il seguente codice:
+### Database and Tables
+Next you will have to create a database called "ip"; after that, create a table (in the "ip" database) called "communications" with the following code:
 <pre>
 CREATE TABLE `communications` (
   `id` int UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -47,9 +40,7 @@ CREATE TABLE `communications` (
 
 
 ## Tshark
-Sarà necessario avere Tshark disponibile nel PATH della propria macchina.
-Per farlo è possibile installare l'intera suite Wireshark. Nel caso di una
-distribuzione Ubuntu:
+You will need Tshark available in the PATH of your machine. To do this, you can install the entire Wireshark suite. In case of an Ubuntu distribution with the command:
 
     sudo apt install wireshark
     
